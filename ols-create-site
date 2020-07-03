@@ -1,0 +1,90 @@
+#!/bin/sh
+echo " OLS CLOUD ROCKET - 0.1"
+echo "Informe o domínio (sem www):"
+read DOMAIN
+echo FTP usuário :
+read USERNAME
+if [ `sed -n "/^$USERNAME/p" /etc/passwd` ]
+then
+    echo "Usuário FTP [$USERNAME] já existe. Por favor, adicione um novo nome de usuário FTP."
+	exit 1
+else  
+
+echo FTP Password :
+read PASSWORD
+
+HOMEDIR="/home/$DOMAIN"
+SERVERROOT="/usr/local/lsws"
+DOMAINCONF="$SERVERROOT/conf/templates/$DOMAIN.conf"
+
+# Criando diretório
+mkdir $HOMEDIR
+mkdir $HOMEDIR/{public_html,logs}
+mkdir $SERVERROOT/conf/vhosts/$DOMAIN
+mkdir $SERVERROOT/conf/cert/$DOMAIN
+
+# Criando o arquivo
+touch $HOMEDIR/public_html/.htaccess
+touch /$HOMEDIR/logs/{error.log,access.log}
+cat << EOT > $HOMEDIR/public_html/index.php
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=windows-1252"><title>Cloud Rocket - Página padrão.</title>
+<style>
+  body { text-align: center; padding: 150px; }
+  h1 { font-size: 50px; }
+  body { font: 20px Helvetica, sans-serif; color: #333; }
+  article { display: block; text-align: left; width: 650px; margin: 0 auto; }
+  a { color: #dc8100; text-decoration: none; }
+  a:hover { color: #333; text-decoration: none; }
+</style>
+</head><body data-gr-c-s-loaded="true"><article>
+<h1>Funciona! Esta é a página da web padrão. Nenhum conteúdo foi adicionado ainda.</h1>
+<div>
+<p>Obrigado por usar o OLS Cloud Rocket.</p>
+</div>
+<?php
+echo 'Versão atual do PHP : ' . phpversion();
+?>
+</article></body></html>
+EOT
+
+# Modificar arquivo de configuração do OLS
+cp $SERVERROOT/conf/templates/incl.conf $SERVERROOT/conf/templates/$DOMAIN.conf
+cp $SERVERROOT/conf/templates/vhconf.conf $SERVERROOT/conf/vhosts/$DOMAIN/vhconf.conf
+sed -i "s/##DOMAIN##/$DOMAIN/g" $SERVERROOT/conf/templates/$DOMAIN.conf
+sed -i "s/##DOMAIN##/$DOMAIN/g" $SERVERROOT/conf/vhosts/$DOMAIN/vhconf.conf
+# Adicionado por Sidney Andrews
+sed -i "s/##USERNAME##/$USERNAME/g" $SERVERROOT/conf/vhosts/$DOMAIN/vhconf.conf
+sed -i "/defdomain[[:space:]][*]/a \  map                     $DOMAIN $DOMAIN" $SERVERROOT/conf/httpd_config.conf
+sed -i "s/virtualhost[[:space:]]defdomain[[:space:]]{/cat \/usr\/local\/lsws\/conf\/templates\/$DOMAIN.conf/e" $SERVERROOT/conf/httpd_config.conf
+rm -f $DOMAINCONF
+
+# Gerar certificado
+openssl genrsa -out $SERVERROOT/conf/cert/$DOMAIN/$DOMAIN.key 2048
+openssl rsa -in $SERVERROOT/conf/cert/$DOMAIN/$DOMAIN.key -out $SERVERROOT/conf/cert/$DOMAIN/$DOMAIN.key
+openssl req -sha256 -new -key $SERVERROOT/conf/cert/$DOMAIN/$DOMAIN.key -out $SERVERROOT/conf/cert/$DOMAIN/$DOMAIN.csr -subj "/CN=$DOMAIN"
+openssl x509 -req -sha256 -days 365 -in $SERVERROOT/conf/cert/$DOMAIN/$DOMAIN.csr -signkey $SERVERROOT/conf/cert/$DOMAIN/$DOMAIN.key -out $SERVERROOT/conf/cert/$DOMAIN/$DOMAIN.crt
+
+# Criando usuário FTP
+useradd $USERNAME -d /home/$DOMAIN -p $(echo $PASSWORD | openssl passwd -1 -stdin) -M
+
+# Ajustando permissões
+chown -R $USERNAME:$USERNAME $HOMEDIR/public_html/
+chown -R lsadm:lsadm $SERVERROOT/conf/cert/
+chown -R lsadm:lsadm $SERVERROOT/conf/vhosts/
+chown -R lsadm:lsadm $SERVERROOT/conf/templates/
+
+# Recarregar e mostrar na tela as informações do site criado
+/usr/local/lsws/bin/lswsctrl reload
+echo -e $DOMAIN:$HOMEDIR >> $SERVERROOT/domain
+echo =================================================
+echo Done!
+echo Your vhost is ready
+REMOTEIP=$(curl -s https://checkip.amazonaws.com)
+echo "Atualizar registro DNS A com $REMOTEIP"
+echo "Domínio       : $DOMAIN"
+echo "PATH      : $HOMEDIR"
+echo "usuário FTP     : $USERNAME"
+echo "Senha FTP : $PASSWORD"
+echo =================================================
+echo "POR FAVOR, MANTENHA ISTO PARA SEUS REGISTROS E REFERÊNCIA FUTURA - CLOUD ROCKET"
+fi
